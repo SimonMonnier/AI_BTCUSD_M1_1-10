@@ -14,8 +14,8 @@ if not mt5.initialize():
     mt5.shutdown()
 
 # Set symbol and timeframe
-symbol = 'XAUUSD'
-timeframe = mt5.TIMEFRAME_M15
+symbol = 'BTCUSD'
+timeframe = mt5.TIMEFRAME_M1
 
 # Load the trained model
 # Define the model architecture
@@ -32,15 +32,15 @@ class DQN(nn.Module):
         x = self.output(x)
         return x
 
-STATE_SIZE = 26 * 11 + 1 + 2  # Adjusted based on your code
-ACTION_SIZE = 6
+STATE_SIZE = 26 * 11 + 1  # Adjusted based on your code
+ACTION_SIZE = 4
 
 # Create model instance
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = DQN(STATE_SIZE, ACTION_SIZE).to(device)
 
 # Load trained weights
-model.load_state_dict(torch.load('dqn_trading_model_best_marge_2.pth', map_location=device))
+model.load_state_dict(torch.load('dqn_trading_model_best_marge_2-1.pth', map_location=device))
 model.eval()  # Set model to evaluation mode
 
 # Initialize variables for positions
@@ -57,6 +57,39 @@ drawdown = 0.0
 drawup = 0.0
 previous_profit_buy = 0.0
 previous_profit_sell = 0.0
+
+def update_positions():
+    global position_buy, position_sell, entry_price_buy, entry_price_sell
+    positions = mt5.positions_get(symbol=symbol)
+    if positions is None:
+        print("Failed to get positions")
+        position_buy = None
+        position_sell = None
+        entry_price_buy = 0.0
+        entry_price_sell = 0.0
+    else:
+        # Reset positions
+        position_buy = None
+        position_sell = None
+        entry_price_buy = 0.0
+        entry_price_sell = 0.0
+        for pos in positions:
+            if pos.type == mt5.POSITION_TYPE_BUY:
+                position_buy = 'buy'
+                entry_price_buy = pos.price_open
+                print(f"Detected open BUY position at price {entry_price_buy}")
+            elif pos.type == mt5.POSITION_TYPE_SELL:
+                position_sell = 'sell'
+                entry_price_sell = pos.price_open
+                print(f"Detected open SELL position at price {entry_price_sell}")
+
+def get_account_balance():
+    account_info = mt5.account_info()
+    if account_info is not None:
+        return account_info.balance
+    else:
+        print("Failed to get account info")
+        return None
 
 def get_state():
     # Get the time of the last closed bar
@@ -116,7 +149,7 @@ def get_state():
         order_state = 1
     elif position_sell == 'sell':
         order_state = 2
-    state = np.append(state/1000, [profit_sell, profit_buy, order_state])
+    state = np.append(state/100000, [order_state])
     return state
 
 def act(state):
@@ -132,6 +165,10 @@ def execute_action(action):
     global position_buy, position_sell, entry_price_buy, entry_price_sell
     global wait_buy, wait_sell, profit_buy, profit_sell, previous_profit_buy, previous_profit_sell
     global drawdown, drawup
+
+    balance = get_account_balance()
+    update_positions()
+
     # Get current prices
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
@@ -156,7 +193,7 @@ def execute_action(action):
         drawup = profit_tmp
     # Execute action
     if action == 1:  # Buy
-        if position_buy is None and position_sell is None:
+        if position_buy is None:
             # Open buy position
             open_buy_order()
             position_buy = 'buy'
@@ -166,7 +203,7 @@ def execute_action(action):
         else:
             print("Cannot open buy position, already in position")
     elif action == 2:  # Sell
-        if position_sell is None and position_buy is None:
+        if position_sell is None:
             # Open sell position
             open_sell_order()
             position_sell = 'sell'
@@ -175,25 +212,7 @@ def execute_action(action):
             print("Open sell position !!!")
         else:
             print("Cannot open sell position, already in position")
-    elif action == 3:  # Close buy
-        if position_buy == 'buy':
-            close_buy_order()
-            position_buy = None
-            entry_price_buy = 0.0
-            wait_buy = 0
-            print("Close buy position !!!")
-        else:
-            print("No buy position to close")
-    elif action == 4:  # Close sell
-        if position_sell == 'sell':
-            close_sell_order()
-            position_sell = None
-            entry_price_sell = 0.0
-            wait_sell = 0
-            print("Sell buy position !!!")
-        else:
-            print("No sell position to close")
-    elif action == 0 or action == 5:  # Wait
+    elif action == 0 or action == 3:  # Wait
         wait_buy += 1
         wait_sell += 1
         print("Wait...")
@@ -202,6 +221,11 @@ def execute_action(action):
     previous_profit_sell = profit_sell
 
 def open_buy_order():
+    # Récupérer le solde du compte
+    balance = get_account_balance()
+    if balance is None:
+        print("Cannot retrieve account balance")
+        return
     # Prepare the request
     symbol_info = mt5.symbol_info(symbol)
     if symbol_info is None:
@@ -211,16 +235,30 @@ def open_buy_order():
         if not mt5.symbol_select(symbol, True):
             print("Failed to select", symbol)
             return
-    # Prepare the order request
-    lot = 0.01  # Adjust lot size as needed
+    # Calculate lot size based on balance
+    if balance <= 1000:
+        lot = 0.01
+    elif balance <= 10000:
+        lot = 0.1
+    elif balance <= 100000:
+        lot = 1.0
+    elif balance <= 1000000:
+        lot = 10.0
+    elif balance <= 10000000:
+        lot = 100.0
     price = mt5.symbol_info_tick(symbol).ask
-    deviation = 50
+    point = symbol_info.point
+    sl_price = price - 3000 * point  # SL en dessous du prix d'entrée
+    tp_price = price + 30000 * point
+    deviation = 20
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
         "symbol": symbol,
         "volume": lot,
         "type": mt5.ORDER_TYPE_BUY,
         "price": price,
+        "sl": sl_price,
+        "tp": tp_price,
         "deviation": deviation,
         "magic": 234000,  # Arbitrary number
         "comment": "Python script open",
@@ -235,6 +273,11 @@ def open_buy_order():
         print("Buy order opened at price", price)
 
 def open_sell_order():
+    # Récupérer le solde du compte
+    balance = get_account_balance()
+    if balance is None:
+        print("Cannot retrieve account balance")
+        return
     # Prepare the request
     symbol_info = mt5.symbol_info(symbol)
     if symbol_info is None:
@@ -244,9 +287,22 @@ def open_sell_order():
         if not mt5.symbol_select(symbol, True):
             print("Failed to select", symbol)
             return
-    # Prepare the order request
-    lot = 0.01  # Adjust lot size as needed
+        
+    if balance <= 1000:
+        lot = 0.01
+    elif balance <= 10000:
+        lot = 0.1
+    elif balance <= 100000:
+        lot = 1.0
+    elif balance <= 1000000:
+        lot = 10.0
+    elif balance <= 10000000:
+        lot = 100.0
+
     price = mt5.symbol_info_tick(symbol).bid
+    point = symbol_info.point
+    sl_price = price + 3000 * point  # SL au-dessus du prix d'entrée
+    tp_price = price - 30000 * point  
     deviation = 20
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
@@ -254,6 +310,8 @@ def open_sell_order():
         "volume": lot,
         "type": mt5.ORDER_TYPE_SELL,
         "price": price,
+        "sl": sl_price,
+        "tp": tp_price,
         "deviation": deviation,
         "magic": 234000,  # Arbitrary number
         "comment": "Python script open sell",
@@ -337,7 +395,20 @@ def main():
             print("Warning: Trading on a live account")
         print("Account Info:", account_info)
 
+        # Afficher le solde initial du compte
+        balance = get_account_balance()
+        if balance is not None:
+            print(f"Initial Account Balance: {balance}")
+        
+        update_positions()
+
         while True:
+            # Récupérer et afficher le solde du compte à chaque itération
+            balance = get_account_balance()
+            if balance is not None:
+                print(f"Current Account Balance: {balance}")
+            update_positions()
+
             # Wait for a new bar
             rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, 1)
             if rates is None or len(rates) == 0:
@@ -346,6 +417,7 @@ def main():
                 continue
             last_bar_time = rates[0]['time']
             while True:
+                update_positions()
                 time.sleep(1)  # Wait for 1 second
                 rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, 1)
                 if rates is None or len(rates) == 0:
