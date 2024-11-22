@@ -112,6 +112,7 @@ class TradingEnvironment:
         self.previous_profit_sell = 0.0
         state = self.states[self.current_step]
         state = np.append(state, [0])
+        self.solde = 100
         return state
 
     def get_state(self):
@@ -144,26 +145,93 @@ class TradingEnvironment:
             if profit_buy_tp >= 300 :
                 self.position_buy = None
                 reward = 3.14
-                profit_buy = 300
+                if self.solde <= 1000:
+                    profit_buy = 3
+                    self.solde += profit_buy
+                elif self.solde <= 10000:
+                    profit_buy = 30
+                    self.solde += profit_buy
+                elif self.solde <= 100000:
+                    profit_buy = 300
+                    self.solde += profit_buy
+                elif self.solde <= 1000000:
+                    profit_buy = 3000
+                    self.solde += profit_buy
+                elif self.solde <= 10000000:
+                    profit_buy = 30000
+                    self.solde += profit_buy
+                elif self.solde > 10000000:
+                    profit_buy = -3000
                 self.closed_trades.append(profit_buy)
             elif profit_buy_sl <= -30 :
                 self.position_buy = None
                 reward = -0.314
-                profit_buy = -30
+                if self.solde <= 1000:
+                    profit_buy = -0.3
+                    self.solde += profit_buy
+                elif self.solde <= 10000:
+                    profit_buy = -3
+                    self.solde += profit_buy
+                elif self.solde <= 100000:
+                    profit_buy = -30
+                    self.solde += profit_buy
+                elif self.solde <= 1000000:
+                    profit_buy = -300
+                    self.solde += profit_buy
+                elif self.solde <= 10000000:
+                    profit_buy = -3000
+                    self.solde += profit_buy
+                elif self.solde > 10000000:
+                    profit_buy = -3000
+                    self.solde += profit_buy
                 self.closed_trades.append(profit_buy)
 
         if self.position_sell == 'sell':
-            profit_buy_tp = current_price_low - self.entry_price_buy
-            profit_buy_sl = current_price_high - self.entry_price_buy
-            if profit_sell >= 300 :
+            profit_buy_tp = current_price_low - self.entry_price_sell
+            profit_buy_sl = current_price_high - self.entry_price_sell
+            if profit_buy_tp >= 300 :
                 self.position_sell = None
                 reward = 3.14
-                profit_sell = 300
+                if self.solde <= 1000:
+                    profit_sell = 3
+                    self.solde += profit_sell
+                elif self.solde <= 10000:
+                    profit_sell = 30
+                    self.solde += profit_sell
+                elif self.solde <= 100000:
+                    profit_sell = 300
+                    self.solde += profit_sell
+                elif self.solde <= 1000000:
+                    profit_sell = 3000
+                    self.solde += profit_sell
+                elif self.solde <= 10000000:
+                    profit_sell = 30000
+                    self.solde += profit_sell
+                elif self.solde > 10000000:
+                    profit_sell = 30000
+                    self.solde += profit_sell
                 self.closed_trades.append(profit_sell)
-            elif profit_sell <= -30 :
+            elif profit_buy_sl <= -30 :
                 self.position_sell = None
                 reward = -0.314
-                profit_sell = -30
+                if self.solde <= 1000:
+                    profit_sell = -0.3
+                    self.solde += profit_sell
+                elif self.solde <= 10000:
+                    profit_sell = -3
+                    self.solde += profit_sell
+                elif self.solde <= 100000:
+                    profit_sell = -30
+                    self.solde += profit_sell
+                elif self.solde <= 1000000:
+                    profit_sell = -300
+                    self.solde += profit_sell
+                elif self.solde <= 10000000:
+                    profit_sell = -3000
+                    self.solde += profit_sell
+                elif self.solde > 10000000:
+                    profit_sell = -3000
+                    self.solde += profit_sell
                 self.closed_trades.append(profit_sell)
             else:
                 profit_sell = 0
@@ -224,8 +292,10 @@ class TradingEnvironment:
         marge = perte + profit 
           # Mettre à jour l'action précédente
         next_state = np.append(next_state/100000, [order_state])
-        #next_state = np.append(next_state, [self.previous_action, profit_sell, profit_buy, buy_state, sell_state])
         
+        if self.solde <= 50:
+            done = True
+            reward = -31.4
         return next_state, reward, done, profit, perte, marge
 
 class DQN(nn.Module):
